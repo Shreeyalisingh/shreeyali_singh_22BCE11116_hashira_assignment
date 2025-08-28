@@ -9,16 +9,33 @@ output 2:
 <img src="./output2.png"/>
 
 
-The program reads a JSON containing Shamir’s Secret Sharing points (x, y) and the parameters n and k. It:
+Key Components:
 
-Parses the points from JSON.
+Point class
+Holds a share as (x, y) where y is a BigInteger.
 
-Generates all combinations of k points.
+Main logic
 
-Uses Lagrange interpolation at x=0 to compute the secret for each combination.
+Reads input.json and extracts n (total shares) and k (required shares).
 
-Finds the most frequent secret → the true secret.
+Parses all shares into Point objects.
 
-Classifies points as valid (lie on the polynomial) or outliers (don’t).
+Generates all k-combinations of shares.
 
-Verifies the secret using only valid points.
+Computes the secret from each combination using Lagrange interpolation.
+
+Finds the most frequent secret → considered the true secret.
+
+Identifies valid shares (part of any combination giving true secret) and outliers.
+
+Verifies the secret using only valid shares.
+
+Helpers
+
+extractInt → extracts integers from JSON via regex.
+
+parsePoints → parses (x, y) shares from JSON.
+
+getCombinations → generates all k-sized combinations.
+
+lagrange → performs Lagrange interpolation at x = 0 to recover the secret.
