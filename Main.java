@@ -5,99 +5,133 @@ import java.util.*;
 import java.util.regex.*;
 
 public class Main {
-    
+
+    // Simple data holder for (x,y)
     private static class Point {
         long x;
         BigInteger y;
-        
+
         Point(long x, BigInteger y) {
             this.x = x;
             this.y = y;
         }
+
+        @Override
+        public String toString() {
+            return "(" + x + ", " + y + ")";
+        }
     }
-    
+
     public static void main(String[] args) {
-        Scanner input = new Scanner(System.in);
-        
         try {
-            // Load the JSON data
-            byte[] fileBytes = Files.readAllBytes(Paths.get("input.json"));
-            String jsonData = new String(fileBytes).replaceAll("\\s", "");
-            
-            // Parse threshold values
-            int totalShares = extractNumber(jsonData, "\"n\":(\\d+)");
-            int requiredShares = extractNumber(jsonData, "\"k\":(\\d+)");
-            
-            System.out.printf("Shares needed: %d out of %d%n", requiredShares, totalShares);
-            
-            // Extract coordinate data
-            ArrayList<Point> coordinates = parseCoordinates(jsonData);
-            
-            System.out.println("\nParsed coordinates:");
-            for (Point p : coordinates) {
-                System.out.printf("x=%d, y=%s%n", p.x, p.y.toString());
+            // Read file content
+            String json = Files.readString(Paths.get("test.json")).replaceAll("\\s", "");
+
+            int totalShares = extractInt(json, "\"n\":(\\d+)");
+            int requiredShares = extractInt(json, "\"k\":(\\d+)");
+            System.out.printf("Shares needed: %d of %d%n", requiredShares, totalShares);
+
+            // Parse all coordinates
+            List<Point> points = parsePoints(json);
+            System.out.println("\nParsed points:");
+            points.forEach(System.out::println);
+
+            // Compute secret for every k-combination
+            List<List<Point>> combos = getCombinations(points, requiredShares);
+            Map<BigInteger, Integer> freq = new HashMap<>();
+
+            for (List<Point> combo : combos) {
+                BigInteger secret = lagrange(combo, 0);
+                freq.put(secret, freq.getOrDefault(secret, 0) + 1);
             }
-            
-            // Take only the minimum required points
-            List<Point> workingSet = coordinates.subList(0, requiredShares);
-            
-            // Reconstruct the polynomial's constant term
-            BigInteger constantTerm = lagrangeInterpolation(workingSet, 0);
-            System.out.printf("%nRecovered secret: %s%n", constantTerm);
-            
-        } catch (Exception ex) {
-            System.err.println("Processing failed: " + ex.getMessage());
-            ex.printStackTrace();
-        }
-    }
-    
-    private static int extractNumber(String text, String regex) {
-        Pattern p = Pattern.compile(regex);
-        Matcher m = p.matcher(text);
-        return m.find() ? Integer.parseInt(m.group(1)) : 0;
-    }
-    
-    private static ArrayList<Point> parseCoordinates(String jsonText) {
-        ArrayList<Point> points = new ArrayList<>();
-        
-        Pattern coordPattern = Pattern.compile("\"(\\d+)\":\\{\"base\":\"(\\d+)\",\"value\":\"([^\"]+)\"\\}");
-        Matcher coordMatcher = coordPattern.matcher(jsonText);
-        
-        while (coordMatcher.find()) {
-            long xCoord = Long.parseLong(coordMatcher.group(1));
-            int numberBase = Integer.parseInt(coordMatcher.group(2));
-            String encodedValue = coordMatcher.group(3);
-            
-            BigInteger yCoord = new BigInteger(encodedValue, numberBase);
-            points.add(new Point(xCoord, yCoord));
-        }
-        
-        return points;
-    }
-    
-    private static BigInteger lagrangeInterpolation(List<Point> points, long targetX) {
-        BigInteger result = BigInteger.ZERO;
-        int numPoints = points.size();
-        
-        for (int i = 0; i < numPoints; i++) {
-            Point currentPoint = points.get(i);
-            BigInteger yValue = currentPoint.y;
-            
-            BigInteger numerator = BigInteger.ONE;
-            BigInteger denominator = BigInteger.ONE;
-            
-            for (int j = 0; j < numPoints; j++) {
-                if (i != j) {
-                    Point otherPoint = points.get(j);
-                    numerator = numerator.multiply(BigInteger.valueOf(targetX - otherPoint.x));
-                    denominator = denominator.multiply(BigInteger.valueOf(currentPoint.x - otherPoint.x));
+
+            // Find most frequent secret
+            BigInteger trueSecret = freq.entrySet().stream()
+                    .max(Map.Entry.comparingByValue())
+                    .map(Map.Entry::getKey).orElse(null);
+
+            System.out.println("\nMost frequent secret: " + trueSecret);
+
+            // Identify valid vs outlier points
+            Set<Point> valid = new HashSet<>();
+            Set<Point> outliers = new HashSet<>(points);
+
+            for (List<Point> combo : combos) {
+                if (lagrange(combo, 0).equals(trueSecret)) {
+                    valid.addAll(combo);
                 }
             }
-            
-            BigInteger term = yValue.multiply(numerator).divide(denominator);
-            result = result.add(term);
+            outliers.removeAll(valid);
+
+            System.out.println("\nValid points:");
+            valid.forEach(p -> System.out.println("  " + p));
+
+            System.out.println("\nOutlier points:");
+            outliers.forEach(p -> System.out.println("  " + p));
+
+            // Verification with valid points
+            if (valid.size() >= requiredShares) {
+                List<Point> minimal = new ArrayList<>(valid).subList(0, requiredShares);
+                BigInteger verify = lagrange(minimal, 0);
+                System.out.println("\nVerification using only valid points: " + verify);
+            }
+
+        } catch (Exception e) {
+            e.printStackTrace();
         }
-        
-        return result;
+    }
+
+    // --- Helpers ---
+    private static int extractInt(String text, String regex) {
+        Matcher m = Pattern.compile(regex).matcher(text);
+        return m.find() ? Integer.parseInt(m.group(1)) : 0;
+    }
+
+    private static List<Point> parsePoints(String json) {
+        List<Point> points = new ArrayList<>();
+        Matcher m = Pattern.compile("\"(\\d+)\":\\{\"base\":\"(\\d+)\",\"value\":\"([^\"]+)\"\\}").matcher(json);
+        while (m.find()) {
+            long x = Long.parseLong(m.group(1));
+            int base = Integer.parseInt(m.group(2));
+            BigInteger y = new BigInteger(m.group(3), base);
+            points.add(new Point(x, y));
+        }
+        return points;
+    }
+
+    private static List<List<Point>> getCombinations(List<Point> points, int k) {
+        List<List<Point>> res = new ArrayList<>();
+        buildCombos(points, k, 0, new ArrayList<>(), res);
+        return res;
+    }
+
+    private static void buildCombos(List<Point> points, int k, int start,
+                                    List<Point> curr, List<List<Point>> res) {
+        if (curr.size() == k) {
+            res.add(new ArrayList<>(curr));
+            return;
+        }
+        for (int i = start; i < points.size(); i++) {
+            curr.add(points.get(i));
+            buildCombos(points, k, i + 1, curr, res);
+            curr.remove(curr.size() - 1);
+        }
+    }
+
+    private static BigInteger lagrange(List<Point> pts, long targetX) {
+        BigInteger sum = BigInteger.ZERO;
+        for (int i = 0; i < pts.size(); i++) {
+            Point pi = pts.get(i);
+            BigInteger num = BigInteger.ONE, den = BigInteger.ONE;
+            for (int j = 0; j < pts.size(); j++) {
+                if (i != j) {
+                    Point pj = pts.get(j);
+                    num = num.multiply(BigInteger.valueOf(targetX - pj.x));
+                    den = den.multiply(BigInteger.valueOf(pi.x - pj.x));
+                }
+            }
+            sum = sum.add(pi.y.multiply(num).divide(den));
+        }
+        return sum;
     }
 }
