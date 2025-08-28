@@ -3,7 +3,7 @@ output of sample test case:
 
 <img src="./output1.png"/>
 
-output of sample test case:
+output of second test case:
 <br/>
 <img src="./output2.png"/>
 
